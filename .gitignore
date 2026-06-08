@@ -137,10 +137,6 @@ backend/dist/
 
 # Database / Save files
 # Ignoramos la base de datos local para que cada quien tenga su propio progreso
-backend/savegame.sqlite
-backend/savegame.sqlite-journal
-backend/savegame.sqlite-wal
-backend/savegame.sqlite-shm
-backend/savegame.sqlite-wal
 *.sqlite
+*.sqlite-*
 *.db
