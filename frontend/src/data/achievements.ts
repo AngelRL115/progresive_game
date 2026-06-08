@@ -1,4 +1,4 @@
-import { GameState } from '../store/gameStore';
+import type { GameState } from '../store/gameStore';
 
 export interface Achievement {
   id: string;

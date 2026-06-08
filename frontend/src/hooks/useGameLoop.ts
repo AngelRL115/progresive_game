@@ -6,7 +6,7 @@ export const useGameLoop = () => {
   const checkAchievements = useGameStore(state => state.checkAchievements);
   const lastTimeRef = useRef<number>(performance.now());
   const lastAchCheckRef = useRef<number>(performance.now());
-  const requestRef = useRef<number>();
+  const requestRef = useRef<number>(0);
 
   const loop = (time: number) => {
     const deltaTime = time - lastTimeRef.current;

@@ -138,14 +138,14 @@ const initialPerks: Perk[] = [
 ];
 
 const initialResearches: Research[] = [
-  { id: 'r1', name: 'Energy Condenser', description: '+50% global production per level', baseCost: 5, costMultiplier: 1.5, level: 0 },
-  { id: 'r2', name: 'Quantum Acceleration', description: '+5% QC generation per level', baseCost: 15, costMultiplier: 1.8, level: 0 },
-  { id: 'r3', name: 'Chronos Mastery', description: '+10% Offline progress effectiveness per level', baseCost: 50, costMultiplier: 2.0, level: 0 },
-  { id: 'r4', name: 'Cosmic Architecture', description: 'Generators base cost reduced by 1% per level', baseCost: 30, costMultiplier: 1.6, level: 0 },
-  { id: 'r5', name: 'Prestige Resonance', description: '+1% Prestige Multiplier base effectiveness per level', baseCost: 100, costMultiplier: 2.5, level: 0 },
-  { id: 'r6', name: 'Subatomic Efficiency', description: '+2% base output to all generators per level', baseCost: 150, costMultiplier: 2.2, level: 0 },
-  { id: 'r7', name: 'Dark Energy Synthesis', description: 'Active abilities last 1s longer per level', baseCost: 300, costMultiplier: 3.0, level: 0 },
-  { id: 'r8', name: 'Milestone Overdrive', description: 'Milestone multipliers are 5% more effective per level', baseCost: 500, costMultiplier: 4.0, level: 0 },
+  { id: 'r1', name: 'Energy Condenser', description: '+7% global production compounding per level', baseCost: 10, costMultiplier: 1.85, level: 0 },
+  { id: 'r2', name: 'Quantum Acceleration', description: '+15% QC rate compounding per level', baseCost: 50, costMultiplier: 2.0, level: 0 },
+  { id: 'r3', name: 'Chronos Mastery', description: '+10% Offline Progress per level (Max Lvl 10)', baseCost: 100, costMultiplier: 1.75, level: 0 },
+  { id: 'r4', name: 'Cosmic Architecture', description: '-5% to Generator cost multiplier per level (compounding)', baseCost: 200, costMultiplier: 2.5, level: 0 },
+  { id: 'r5', name: 'Prestige Resonance', description: '+1% to Prestige Base Multiplier', baseCost: 500, costMultiplier: 2.1, level: 0 },
+  { id: 'r6', name: 'Quantum Recycling', description: 'Auto-buyers have (Lvl*2.5)% chance to generate 1s of KF', baseCost: 250, costMultiplier: 2.0, level: 0 },
+  { id: 'r7', name: 'Dark Energy Synth', description: '+50% Active Skill power per level', baseCost: 100, costMultiplier: 1.9, level: 0 },
+  { id: 'r8', name: 'Milestone Cascade', description: 'Milestones on Gen X grant Virtual Levels to Gen X+1', baseCost: 1000, costMultiplier: 3.0, level: 0 },
 ];
 
 export const getMilestoneMultiplier = (level: number) => {
@@ -164,6 +164,22 @@ export const getMilestoneMultiplier = (level: number) => {
     mult *= Math.pow(10, extra);
   }
   return mult;
+};
+
+export const getMilestoneTier = (level: number) => {
+  let tier = 0;
+  if (level >= 10) tier++;
+  if (level >= 25) tier++;
+  if (level >= 50) tier++;
+  if (level >= 100) tier++;
+  if (level >= 200) tier++;
+  if (level >= 300) tier++;
+  if (level >= 400) tier++;
+  if (level >= 500) tier++;
+  if (level > 500) {
+    tier += Math.floor((level - 500) / 100);
+  }
+  return tier;
 };
 
 export const checkGeneratorVisibility = (genId: string, generators: Generator[], points: number): boolean => {
@@ -200,37 +216,49 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
       if (state.achievements.includes('ach_sk1')) globalMultiplier *= 1.01;
     }
     
-    // Apply Lab Energy Condenser
+    // Apply Lab Energy Condenser (R1)
     const energyCondenser = state.researches.find(r => r.id === 'r1');
     if (energyCondenser && energyCondenser.level > 0) {
-      globalMultiplier += (energyCondenser.level * 0.5);
+      globalMultiplier *= Math.pow(1.07, energyCondenser.level);
     }
 
-    // Apply Subatomic Efficiency
-    const subatomicEff = state.researches.find(r => r.id === 'r6');
-    if (subatomicEff && subatomicEff.level > 0) {
-      globalMultiplier *= (1 + subatomicEff.level * 0.02);
-    }
-
+    // Apply Subatomic Efficiency (old R6, if it exists as legacy in state) - removed, handled by new R6
+    
     // Apply Quantum Singularity Perk
     const singularityPerk = state.perks.find(p => p.effectType === 'global_boost' && p.purchased);
     if (singularityPerk) globalMultiplier *= singularityPerk.effectValue;
 
+    const darkEnergy = state.researches.find(r => r.id === 'r7');
+    const r7Mult = 1 + (darkEnergy ? darkEnergy.level * 0.5 : 0);
+
     state.upgrades.filter(u => (!u.isTemporary && u.purchased && !u.targetGeneratorId) || (u.isTemporary && !u.targetGeneratorId && u.activeUntil && u.activeUntil > now)).forEach(u => {
-      globalMultiplier *= u.multiplier;
+      let m = u.multiplier;
+      if (u.isTemporary) m *= r7Mult;
+      globalMultiplier *= m;
     });
 
     let totalLevels = 0;
     
-    // Milestone Overdrive Research
-    const overdriveRes = state.researches.find(r => r.id === 'r8');
-    const overdriveMult = 1 + (overdriveRes ? overdriveRes.level * 0.05 : 0);
+    // R8: Milestone Cascade (O(N) calculation)
+    const cascadeRes = state.researches.find(r => r.id === 'r8');
+    const cascadeLevel = cascadeRes ? cascadeRes.level : 0;
+    
+    const virtualLevels = new Array(state.generators.length).fill(0);
+    if (cascadeLevel > 0) {
+      for (let i = 0; i < state.generators.length - 1; i++) {
+        const gen = state.generators[i];
+        // Solo cuentan los niveles REALES para empujar hacia abajo, para evitar feedback loops.
+        const tier = getMilestoneTier(gen.level);
+        virtualLevels[i + 1] = tier * cascadeLevel;
+      }
+    }
 
-    state.generators.forEach(gen => {
+    state.generators.forEach((gen, index) => {
       totalLevels += gen.level;
-      if (gen.level > 0) {
-        let genMultiplier = getMilestoneMultiplier(gen.level);
-        if (genMultiplier > 1) genMultiplier *= overdriveMult;
+      const effectiveLevel = gen.level + virtualLevels[index];
+      
+      if (effectiveLevel > 0) {
+        let genMultiplier = getMilestoneMultiplier(effectiveLevel);
         
         // Achievement Gen Multipliers
         if (state.achievements) {
@@ -244,10 +272,12 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
         }
 
         state.upgrades.filter(u => (!u.isTemporary && u.purchased && u.targetGeneratorId === gen.id) || (u.isTemporary && u.targetGeneratorId === gen.id && u.activeUntil && u.activeUntil > now)).forEach(u => {
-          genMultiplier *= u.multiplier;
+          let m = u.multiplier;
+          if (u.isTemporary) m *= r7Mult;
+          genMultiplier *= m;
         });
 
-        const rate = (gen.baseOutput * gen.level * genMultiplier * globalMultiplier);
+        const rate = (gen.baseOutput * effectiveLevel * genMultiplier * globalMultiplier);
         pointsPerSec += rate;
         generatedPoints += rate * (deltaTimeMs / 1000);
       }
@@ -272,8 +302,8 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
         if (state.achievements.includes('ach_g3')) kfMult *= 1.10;
       }
 
-      // Base KF generation off sqrt of raw points per sec to balance scaling
-      kfPerSec = (Math.pow(pointsPerSec * 2, 0.5) * 0.005) * kfMult; 
+      // Base KF generation Opción B: Math.pow(Puntos/s, 0.65) * 0.001
+      kfPerSec = (Math.pow(pointsPerSec, 0.65) * 0.001) * kfMult; 
       generatedKF = kfPerSec * (deltaTimeMs / 1000);
     }
 
@@ -297,6 +327,9 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
 
     // Auto-Buyers logic (from highest to lowest to prioritize expensive generators if unlocked)
     if (state.autoBuyers) {
+      let quantumRecycleTriggered = false;
+      const subatomicEff = state.researches.find(r => r.id === 'r6');
+      
       for (let i = updatedGenerators.length - 1; i >= 0; i--) {
         const gen = updatedGenerators[i];
         const ab = state.autoBuyers[gen.id];
@@ -305,7 +338,7 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
           let baseDiscount = discountPerk ? discountPerk.effectValue : 1;
           const cosmicArch = state.researches.find(r => r.id === 'r4');
           if (cosmicArch && cosmicArch.level > 0) {
-            baseDiscount *= Math.max(0.1, 1 - (cosmicArch.level * 0.01));
+            baseDiscount *= Math.pow(0.95, cosmicArch.level);
           }
 
           let discount = baseDiscount;
@@ -329,6 +362,17 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
           }
           if (bought) {
             updatedGenerators[i] = { ...gen, level: currentLevel };
+            
+            // R6 Quantum Recycling logic
+            if (!quantumRecycleTriggered && subatomicEff && subatomicEff.level > 0) {
+              const chance = subatomicEff.level * 0.025;
+              if (Math.random() < chance) {
+                // Generate 1s worth of KF if research mode is active, otherwise base points
+                const kfGained = kfPerSec > 0 ? kfPerSec : (Math.pow(pointsPerSec, 0.65) * 0.001);
+                generatedKF += kfGained;
+                quantumRecycleTriggered = true;
+              }
+            }
           }
         }
       }
@@ -442,7 +486,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
     const cosmicArch = state.researches.find(r => r.id === 'r4');
     if (cosmicArch && cosmicArch.level > 0) {
-      discount *= Math.max(0.1, 1 - (cosmicArch.level * 0.01));
+      discount *= Math.pow(0.95, cosmicArch.level);
     }
     
     const cost = Math.floor(gen.baseCost * discount * Math.pow(gen.costMultiplier, gen.level));
@@ -520,14 +564,11 @@ export const useGameStore = create<GameState>((set, get) => ({
     const now = Date.now();
     if (upgrade.cooldownUntil && now < upgrade.cooldownUntil) return state;
     
-    let bonusDuration = 0;
-    const darkEnergy = state.researches.find(r => r.id === 'r7');
-    if (darkEnergy) bonusDuration += darkEnergy.level * 1000;
-
     const cooldownPerk = state.perks.find(p => p.effectType === 'cooldown_reduction' && p.purchased);
     let cdMult = cooldownPerk ? cooldownPerk.effectValue : 1;
 
     // Achievement rewards
+    let bonusDuration = 0;
     if (state.achievements.includes('ach_sk2')) bonusDuration += 2000;
     if (state.achievements.includes('ach_sk3')) cdMult *= 0.9;
 
@@ -561,10 +602,22 @@ export const useGameStore = create<GameState>((set, get) => ({
   loadState: (savedState) => set((state) => ({
     ...state,
     ...savedState,
-    generators: savedState.generators && savedState.generators.length === state.generators.length ? savedState.generators : state.generators,
-    upgrades: savedState.upgrades && savedState.upgrades.length === state.upgrades.length ? savedState.upgrades : state.upgrades,
-    perks: savedState.perks && savedState.perks.length === state.perks.length ? savedState.perks : state.perks,
-    researches: savedState.researches && savedState.researches.length === state.researches.length ? savedState.researches : state.researches,
+    generators: state.generators.map(g => {
+      const savedG = savedState.generators?.find(sg => sg.id === g.id);
+      return savedG ? { ...g, level: savedG.level } : g;
+    }),
+    upgrades: state.upgrades.map(u => {
+      const savedU = savedState.upgrades?.find(su => su.id === u.id);
+      return savedU ? { ...u, purchased: savedU.purchased, durationLevel: savedU.durationLevel || 0 } : u;
+    }),
+    perks: state.perks.map(p => {
+      const savedP = savedState.perks?.find(sp => sp.id === p.id);
+      return savedP ? { ...p, purchased: savedP.purchased } : p;
+    }),
+    researches: state.researches.map(r => {
+      const savedR = savedState.researches?.find(sr => sr.id === r.id);
+      return savedR ? { ...r, level: savedR.level } : r;
+    }),
     autoBuyers: savedState.autoBuyers || state.autoBuyers,
     achievements: savedState.achievements || [],
     statistics: { ...state.statistics, ...(savedState.statistics || {}) }
