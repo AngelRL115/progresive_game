@@ -8,6 +8,7 @@ import { LaboratoryPanel } from './components/game/LaboratoryPanel';
 import { MilestonePanel } from './components/game/MilestonePanel';
 import { PrestigePanel } from './components/game/PrestigePanel';
 import { Achievements } from './components/game/Achievements';
+import { Challenges } from './components/game/Challenges';
 import { TutorialModal } from './components/layout/TutorialModal';
 import { useGameLoop } from './hooks/useGameLoop';
 import { useGameStore } from './store/gameStore';
@@ -56,6 +57,7 @@ function App() {
       case 'MILESTONES': return <MilestonePanel />;
       case 'PRESTIGE': return <PrestigePanel />;
       case 'ACHIEVEMENTS': return <Achievements />;
+      case 'CHALLENGES': return <Challenges />;
       default: return <UpgradePanel />;
     }
   };

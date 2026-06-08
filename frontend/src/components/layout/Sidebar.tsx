@@ -1,4 +1,4 @@
-import { Zap, Star, Award, RefreshCcw, FlaskConical } from 'lucide-react';
+import { Zap, Star, Award, RefreshCcw, FlaskConical, Swords } from 'lucide-react';
 import { useGameStore } from '../../store/gameStore';
 
 export const Sidebar = () => {
@@ -19,6 +19,7 @@ export const Sidebar = () => {
     { icon: Award, label: 'MILESTONES', visible: hasMilestoneUnlocked },
     { icon: RefreshCcw, label: 'PRESTIGE', visible: hasPrestigeUnlocked },
     { icon: Award, label: 'ACHIEVEMENTS', visible: true },
+    { icon: Swords, label: 'CHALLENGES', visible: hasAdvancedUnlocked },
   ].filter(item => item.visible);
 
   return (
