@@ -64,9 +64,18 @@ export interface GameState {
   
   autoBuyers: Record<string, { unlocked: boolean; active: boolean }>;
   
+  achievements: string[];
+  statistics: {
+    totalClicks: number;
+    skillsActivated: number;
+    timePlayed: number;
+    prestigesDone: number;
+  };
+  
   activeTab: string;
   setActiveTab: (tab: string) => void;
   toggleResearchMode: () => void;
+  checkAchievements: () => void;
 
   unlockAutoBuyer: (genId: string) => void;
   toggleAutoBuyer: (genId: string) => void;
@@ -180,6 +189,17 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
     const prestigeBase = 0.1 + (prestigeResonance ? prestigeResonance.level * 0.01 : 0);
     let globalMultiplier = 1 + (state.prestigeLevel * prestigeBase);
     
+    // Achievement Global Multipliers
+    if (state.achievements) {
+      if (state.achievements.includes('ach_e2')) globalMultiplier *= 1.05;
+      if (state.achievements.includes('ach_lt1')) globalMultiplier *= 1.02;
+      if (state.achievements.includes('ach_p2')) globalMultiplier *= 1.10;
+      if (state.achievements.includes('ach_p4')) globalMultiplier *= 1.05;
+      if (state.achievements.includes('ach_g2')) globalMultiplier *= 1.10;
+      if (state.achievements.includes('ach_g4')) globalMultiplier *= 1.50;
+      if (state.achievements.includes('ach_sk1')) globalMultiplier *= 1.01;
+    }
+    
     // Apply Lab Energy Condenser
     const energyCondenser = state.researches.find(r => r.id === 'r1');
     if (energyCondenser && energyCondenser.level > 0) {
@@ -211,6 +231,17 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
       if (gen.level > 0) {
         let genMultiplier = getMilestoneMultiplier(gen.level);
         if (genMultiplier > 1) genMultiplier *= overdriveMult;
+        
+        // Achievement Gen Multipliers
+        if (state.achievements) {
+          if (gen.id === 'gen1') {
+            if (state.achievements.includes('ach_kf3')) genMultiplier *= 1.50;
+            if (state.achievements.includes('ach_g1')) genMultiplier *= 2.0;
+          }
+          if (['gen5', 'gen6', 'gen7', 'gen8'].includes(gen.id) && state.achievements.includes('ach_m2')) {
+            genMultiplier *= 1.10;
+          }
+        }
 
         state.upgrades.filter(u => (!u.isTemporary && u.purchased && u.targetGeneratorId === gen.id) || (u.isTemporary && u.targetGeneratorId === gen.id && u.activeUntil && u.activeUntil > now)).forEach(u => {
           genMultiplier *= u.multiplier;
@@ -233,7 +264,13 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
       pointsPerSec *= (1 - sacrificeRatio);
 
       const kfBoostPerk = state.perks.find(p => p.effectType === 'kf_boost' && p.purchased);
-      const kfMult = kfBoostPerk ? kfBoostPerk.effectValue : 1;
+      let kfMult = kfBoostPerk ? kfBoostPerk.effectValue : 1;
+      
+      if (state.achievements) {
+        if (state.achievements.includes('ach_lt2')) kfMult *= 1.05;
+        if (state.achievements.includes('ach_kf1')) kfMult *= 1.01;
+        if (state.achievements.includes('ach_g3')) kfMult *= 1.10;
+      }
 
       // Base KF generation off sqrt of raw points per sec to balance scaling
       kfPerSec = (Math.pow(pointsPerSec * 2, 0.5) * 0.005) * kfMult; 
@@ -243,7 +280,14 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
     // QC Rate
     const qcPerk = state.perks.find(p => p.effectType === 'qc_rate' && p.purchased);
     const qcAccel = state.researches.find(r => r.id === 'r2');
-    const qcAccelMult = 1 + (qcAccel ? qcAccel.level * 0.05 : 0);
+    let qcAccelMult = 1 + (qcAccel ? qcAccel.level * 0.05 : 0);
+    
+    if (state.achievements) {
+      if (state.achievements.includes('ach_p1')) qcAccelMult *= 1.01;
+      if (state.achievements.includes('ach_p3')) qcAccelMult *= 1.05;
+      if (state.achievements.includes('ach_qc1')) qcAccelMult *= 1.02;
+      if (state.achievements.includes('ach_ab2')) qcAccelMult *= 1.10;
+    }
 
     const qcPerSec = (totalLevels * 0.0001) * (qcPerk ? qcPerk.effectValue : 1) * qcAccelMult;
     generatedCredits += qcPerSec * (deltaTimeMs / 1000);
@@ -322,9 +366,32 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   toggleResearchMode: () => set(state => ({ isResearchMode: !state.isResearchMode })),
+  
+  checkAchievements: () => {
+    import('../data/achievements').then(({ achievements: achList }) => {
+      const state = get();
+      if (!state.achievements) return;
+      
+      const newAchievements = achList
+        .filter(a => !state.achievements.includes(a.id))
+        .filter(a => a.condition(state))
+        .map(a => a.id);
+        
+      if (newAchievements.length > 0) {
+        set(s => ({ achievements: [...s.achievements, ...newAchievements] }));
+      }
+    });
+  },
 
   autoBuyers: {},
-
+  achievements: [],
+  statistics: {
+    totalClicks: 0,
+    skillsActivated: 0,
+    timePlayed: 0,
+    prestigesDone: 0
+  },
+  
   unlockAutoBuyer: (genId) => set((state) => {
     const index = state.generators.findIndex(g => g.id === genId);
     if (index === -1) return state;
@@ -355,7 +422,8 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   addPoints: (amount) => set((state) => ({ 
     points: state.points + amount,
-    lifetimePoints: state.lifetimePoints + amount
+    lifetimePoints: state.lifetimePoints + amount,
+    statistics: { ...state.statistics, totalClicks: state.statistics.totalClicks + 1 }
   })),
   
   buyGeneratorLevel: (id) => set((state) => {
@@ -429,7 +497,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (!res) return state;
 
     const labDiscount = state.perks.find(p => p.effectType === 'lab_discount' && p.purchased);
-    const discount = labDiscount ? labDiscount.effectValue : 1;
+    let discount = labDiscount ? labDiscount.effectValue : 1;
+    
+    if (state.achievements) {
+      if (state.achievements.includes('ach_lt3')) discount *= 0.95;
+      if (state.achievements.includes('ach_kf2')) discount *= 0.98;
+    }
 
     const cost = Math.floor(res.baseCost * discount * Math.pow(res.costMultiplier, res.level));
     if (state.knowledgeFragments >= cost) {
@@ -452,11 +525,16 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (darkEnergy) bonusDuration += darkEnergy.level * 1000;
 
     const cooldownPerk = state.perks.find(p => p.effectType === 'cooldown_reduction' && p.purchased);
-    const cdMult = cooldownPerk ? cooldownPerk.effectValue : 1;
+    let cdMult = cooldownPerk ? cooldownPerk.effectValue : 1;
+
+    // Achievement rewards
+    if (state.achievements.includes('ach_sk2')) bonusDuration += 2000;
+    if (state.achievements.includes('ach_sk3')) cdMult *= 0.9;
 
     const duration = (upgrade.baseDurationMs || 0) + ((upgrade.durationLevel || 0) * 1000) + bonusDuration;
     return {
-      upgrades: state.upgrades.map(u => u.id === id ? { ...u, activeUntil: now + duration, cooldownUntil: now + duration + ((u.cooldownMs || 10000) * cdMult) } : u)
+      upgrades: state.upgrades.map(u => u.id === id ? { ...u, activeUntil: now + duration, cooldownUntil: now + duration + ((u.cooldownMs || 10000) * cdMult) } : u),
+      statistics: { ...state.statistics, skillsActivated: state.statistics.skillsActivated + 1 }
     };
   }),
 
@@ -466,13 +544,17 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     if (prestigeGain <= 0) return state;
 
+    let initialPoints = 0;
+    if (state.achievements.includes('ach_e1')) initialPoints += 50;
+
     return {
-      points: 0,
+      points: initialPoints,
       prestigeLevel: targetPrestigeLevel,
       generators: initialGenerators,
       upgrades: state.upgrades.map(u => ({ ...u, purchased: false, durationLevel: 0, cost: initialUpgrades.find(iu => iu.id === u.id)?.cost || u.cost })),
       isResearchMode: false,
-      activeTab: 'PRESTIGE'
+      activeTab: 'PRESTIGE',
+      statistics: { ...state.statistics, prestigesDone: state.statistics.prestigesDone + 1 }
     };
   }),
 
@@ -484,6 +566,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     perks: savedState.perks && savedState.perks.length === state.perks.length ? savedState.perks : state.perks,
     researches: savedState.researches && savedState.researches.length === state.researches.length ? savedState.researches : state.researches,
     autoBuyers: savedState.autoBuyers || state.autoBuyers,
+    achievements: savedState.achievements || [],
+    statistics: { ...state.statistics, ...(savedState.statistics || {}) }
   })),
 
   tick: (deltaTimeMs) => set((state) => executeTick(state, deltaTimeMs)),
@@ -499,6 +583,13 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (chronosMastery && chronosMastery.level > 0) {
         boost += (chronosMastery.level * 0.1);
       }
+      
+      if (state.achievements) {
+        if (state.achievements.includes('ach_e3')) boost += 0.05;
+        if (state.achievements.includes('ach_qc2')) boost += 0.10;
+        if (state.achievements.includes('ach_ab1')) boost += 0.05;
+        if (state.achievements.includes('ach_m1')) boost += 0.05;
+      }
 
       const effectiveDiff = diffMs * boost;
       
@@ -512,6 +603,13 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
       
       let simState = { ...state };
+      
+      // Time played achievement logic
+      if (!simState.statistics) {
+        simState.statistics = { totalClicks: 0, skillsActivated: 0, timePlayed: 0, prestigesDone: 0 };
+      }
+      simState.statistics.timePlayed += (diffMs / 1000);
+
       let remaining = effectiveDiff;
       
       for (let i = 0; i < iterations; i++) {

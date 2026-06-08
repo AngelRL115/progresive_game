@@ -18,6 +18,7 @@ export const Sidebar = () => {
     { icon: FlaskConical, label: 'LABORATORY', visible: hasAdvancedUnlocked },
     { icon: Award, label: 'MILESTONES', visible: hasMilestoneUnlocked },
     { icon: RefreshCcw, label: 'PRESTIGE', visible: hasPrestigeUnlocked },
+    { icon: Award, label: 'ACHIEVEMENTS', visible: true },
   ].filter(item => item.visible);
 
   return (

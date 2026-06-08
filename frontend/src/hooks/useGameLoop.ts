@@ -3,7 +3,9 @@ import { useGameStore } from '../store/gameStore';
 
 export const useGameLoop = () => {
   const tick = useGameStore(state => state.tick);
+  const checkAchievements = useGameStore(state => state.checkAchievements);
   const lastTimeRef = useRef<number>(performance.now());
+  const lastAchCheckRef = useRef<number>(performance.now());
   const requestRef = useRef<number>();
 
   const loop = (time: number) => {
@@ -13,6 +15,12 @@ export const useGameLoop = () => {
     // (offline progress handles the actual long absences)
     if (deltaTime > 0 && deltaTime < 1000) {
       tick(deltaTime);
+    }
+    
+    // Check achievements every ~1 second to save performance
+    if (time - lastAchCheckRef.current > 1000) {
+      checkAchievements();
+      lastAchCheckRef.current = time;
     }
     
     lastTimeRef.current = time;
