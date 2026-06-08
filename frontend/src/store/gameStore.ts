@@ -62,9 +62,14 @@ export interface GameState {
   prestigeLevel: number;
   lifetimePoints: number;
   
+  autoBuyers: Record<string, { unlocked: boolean; active: boolean }>;
+  
   activeTab: string;
   setActiveTab: (tab: string) => void;
   toggleResearchMode: () => void;
+
+  unlockAutoBuyer: (genId: string) => void;
+  toggleAutoBuyer: (genId: string) => void;
 
   addPoints: (amount: number) => void;
   buyGeneratorLevel: (id: string) => void;
@@ -152,6 +157,152 @@ export const getMilestoneMultiplier = (level: number) => {
   return mult;
 };
 
+export const checkGeneratorVisibility = (genId: string, generators: Generator[], points: number): boolean => {
+  const index = generators.findIndex(g => g.id === genId);
+  if (index <= 0) return true; // first generator or not found is always visible
+  const gen = generators[index];
+  if (gen.level > 0) return true;
+  if (generators[index - 1].level >= 1) return true;
+  if (points >= gen.baseCost * 0.5) return true;
+  return false;
+};
+
+// Pure function for ticking state
+export const executeTick = (state: GameState, deltaTimeMs: number): Partial<GameState> => {
+    let generatedPoints = 0;
+    let pointsPerSec = 0;
+    let generatedCredits = 0;
+    let generatedKF = 0;
+    const now = Date.now();
+    
+    // Prestige Base + Research R5
+    const prestigeResonance = state.researches.find(r => r.id === 'r5');
+    const prestigeBase = 0.1 + (prestigeResonance ? prestigeResonance.level * 0.01 : 0);
+    let globalMultiplier = 1 + (state.prestigeLevel * prestigeBase);
+    
+    // Apply Lab Energy Condenser
+    const energyCondenser = state.researches.find(r => r.id === 'r1');
+    if (energyCondenser && energyCondenser.level > 0) {
+      globalMultiplier += (energyCondenser.level * 0.5);
+    }
+
+    // Apply Subatomic Efficiency
+    const subatomicEff = state.researches.find(r => r.id === 'r6');
+    if (subatomicEff && subatomicEff.level > 0) {
+      globalMultiplier *= (1 + subatomicEff.level * 0.02);
+    }
+
+    // Apply Quantum Singularity Perk
+    const singularityPerk = state.perks.find(p => p.effectType === 'global_boost' && p.purchased);
+    if (singularityPerk) globalMultiplier *= singularityPerk.effectValue;
+
+    state.upgrades.filter(u => (!u.isTemporary && u.purchased && !u.targetGeneratorId) || (u.isTemporary && !u.targetGeneratorId && u.activeUntil && u.activeUntil > now)).forEach(u => {
+      globalMultiplier *= u.multiplier;
+    });
+
+    let totalLevels = 0;
+    
+    // Milestone Overdrive Research
+    const overdriveRes = state.researches.find(r => r.id === 'r8');
+    const overdriveMult = 1 + (overdriveRes ? overdriveRes.level * 0.05 : 0);
+
+    state.generators.forEach(gen => {
+      totalLevels += gen.level;
+      if (gen.level > 0) {
+        let genMultiplier = getMilestoneMultiplier(gen.level);
+        if (genMultiplier > 1) genMultiplier *= overdriveMult;
+
+        state.upgrades.filter(u => (!u.isTemporary && u.purchased && u.targetGeneratorId === gen.id) || (u.isTemporary && u.targetGeneratorId === gen.id && u.activeUntil && u.activeUntil > now)).forEach(u => {
+          genMultiplier *= u.multiplier;
+        });
+
+        const rate = (gen.baseOutput * gen.level * genMultiplier * globalMultiplier);
+        pointsPerSec += rate;
+        generatedPoints += rate * (deltaTimeMs / 1000);
+      }
+    });
+
+    // Handle Research Mode
+    let kfPerSec = 0;
+    if (state.isResearchMode) {
+      const researchEffPerk = state.perks.find(p => p.effectType === 'research_efficiency' && p.purchased);
+      const sacrificeRatio = researchEffPerk ? researchEffPerk.effectValue : 0.5;
+
+      const divertedEnergy = generatedPoints * sacrificeRatio;
+      generatedPoints -= divertedEnergy;
+      pointsPerSec *= (1 - sacrificeRatio);
+
+      const kfBoostPerk = state.perks.find(p => p.effectType === 'kf_boost' && p.purchased);
+      const kfMult = kfBoostPerk ? kfBoostPerk.effectValue : 1;
+
+      // Base KF generation off sqrt of raw points per sec to balance scaling
+      kfPerSec = (Math.pow(pointsPerSec * 2, 0.5) * 0.005) * kfMult; 
+      generatedKF = kfPerSec * (deltaTimeMs / 1000);
+    }
+
+    // QC Rate
+    const qcPerk = state.perks.find(p => p.effectType === 'qc_rate' && p.purchased);
+    const qcAccel = state.researches.find(r => r.id === 'r2');
+    const qcAccelMult = 1 + (qcAccel ? qcAccel.level * 0.05 : 0);
+
+    const qcPerSec = (totalLevels * 0.0001) * (qcPerk ? qcPerk.effectValue : 1) * qcAccelMult;
+    generatedCredits += qcPerSec * (deltaTimeMs / 1000);
+
+    let newPoints = state.points + generatedPoints;
+    let updatedGenerators = [...state.generators];
+
+    // Auto-Buyers logic (from highest to lowest to prioritize expensive generators if unlocked)
+    if (state.autoBuyers) {
+      for (let i = updatedGenerators.length - 1; i >= 0; i--) {
+        const gen = updatedGenerators[i];
+        const ab = state.autoBuyers[gen.id];
+        if (ab && ab.unlocked && ab.active) {
+          const discountPerk = state.perks.find(p => p.effectType === 'discount' && p.purchased);
+          let baseDiscount = discountPerk ? discountPerk.effectValue : 1;
+          const cosmicArch = state.researches.find(r => r.id === 'r4');
+          if (cosmicArch && cosmicArch.level > 0) {
+            baseDiscount *= Math.max(0.1, 1 - (cosmicArch.level * 0.01));
+          }
+
+          let discount = baseDiscount;
+          const earlyDiscount = state.perks.find(p => p.effectType === 'early_discount' && p.purchased);
+          if (earlyDiscount && gen.level < 10) discount *= earlyDiscount.effectValue;
+
+          let currentLevel = gen.level;
+          let cost = Math.floor(gen.baseCost * discount * Math.pow(gen.costMultiplier, currentLevel));
+          
+          let bought = false;
+          while (newPoints >= cost) {
+            newPoints -= cost;
+            currentLevel++;
+            bought = true;
+            
+            // Re-evaluate discount if we crossed 10
+            if (earlyDiscount && currentLevel === 10) {
+              discount = baseDiscount; 
+            }
+            cost = Math.floor(gen.baseCost * discount * Math.pow(gen.costMultiplier, currentLevel));
+          }
+          if (bought) {
+            updatedGenerators[i] = { ...gen, level: currentLevel };
+          }
+        }
+      }
+    }
+
+    return {
+      points: newPoints,
+      pointsRate: pointsPerSec,
+      lifetimePoints: state.lifetimePoints + generatedPoints,
+      credits: state.credits + generatedCredits,
+      qcRate: qcPerSec,
+      knowledgeFragments: state.knowledgeFragments + generatedKF,
+      kfRate: kfPerSec,
+      lastSaved: now,
+      generators: updatedGenerators
+    };
+};
+
 export const useGameStore = create<GameState>((set, get) => ({
   points: 0,
   pointsRate: 0,
@@ -171,6 +322,36 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   toggleResearchMode: () => set(state => ({ isResearchMode: !state.isResearchMode })),
+
+  autoBuyers: {},
+
+  unlockAutoBuyer: (genId) => set((state) => {
+    const index = state.generators.findIndex(g => g.id === genId);
+    if (index === -1) return state;
+    const cost = 25 * Math.pow(2, index);
+    
+    if (state.credits >= cost && !state.autoBuyers[genId]?.unlocked) {
+      return {
+        credits: state.credits - cost,
+        autoBuyers: {
+          ...state.autoBuyers,
+          [genId]: { unlocked: true, active: true }
+        }
+      };
+    }
+    return state;
+  }),
+
+  toggleAutoBuyer: (genId) => set((state) => {
+    const ab = state.autoBuyers[genId];
+    if (!ab || !ab.unlocked) return state;
+    return {
+      autoBuyers: {
+        ...state.autoBuyers,
+        [genId]: { ...ab, active: !ab.active }
+      }
+    };
+  }),
 
   addPoints: (amount) => set((state) => ({ 
     points: state.points + amount,
@@ -280,12 +461,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   }),
 
   prestigeReset: () => set((state) => {
-    const prestigeGain = Math.floor(Math.sqrt(state.lifetimePoints / 1000000));
+    const targetPrestigeLevel = Math.floor(Math.sqrt(state.lifetimePoints / 1000000));
+    const prestigeGain = targetPrestigeLevel - state.prestigeLevel;
+    
     if (prestigeGain <= 0) return state;
 
     return {
       points: 0,
-      prestigeLevel: state.prestigeLevel + prestigeGain,
+      prestigeLevel: targetPrestigeLevel,
       generators: initialGenerators,
       upgrades: state.upgrades.map(u => ({ ...u, purchased: false, durationLevel: 0, cost: initialUpgrades.find(iu => iu.id === u.id)?.cost || u.cost })),
       isResearchMode: false,
@@ -300,105 +483,15 @@ export const useGameStore = create<GameState>((set, get) => ({
     upgrades: savedState.upgrades && savedState.upgrades.length === state.upgrades.length ? savedState.upgrades : state.upgrades,
     perks: savedState.perks && savedState.perks.length === state.perks.length ? savedState.perks : state.perks,
     researches: savedState.researches && savedState.researches.length === state.researches.length ? savedState.researches : state.researches,
+    autoBuyers: savedState.autoBuyers || state.autoBuyers,
   })),
 
-  tick: (deltaTimeMs) => set((state) => {
-    let generatedPoints = 0;
-    let pointsPerSec = 0;
-    let generatedCredits = 0;
-    let generatedKF = 0;
-    const now = Date.now();
-    
-    // Prestige Base + Research R5
-    const prestigeResonance = state.researches.find(r => r.id === 'r5');
-    const prestigeBase = 0.1 + (prestigeResonance ? prestigeResonance.level * 0.01 : 0);
-    let globalMultiplier = 1 + (state.prestigeLevel * prestigeBase);
-    
-    // Apply Lab Energy Condenser
-    const energyCondenser = state.researches.find(r => r.id === 'r1');
-    if (energyCondenser && energyCondenser.level > 0) {
-      globalMultiplier += (energyCondenser.level * 0.5);
-    }
+  tick: (deltaTimeMs) => set((state) => executeTick(state, deltaTimeMs)),
 
-    // Apply Subatomic Efficiency
-    const subatomicEff = state.researches.find(r => r.id === 'r6');
-    if (subatomicEff && subatomicEff.level > 0) {
-      globalMultiplier *= (1 + subatomicEff.level * 0.02);
-    }
-
-    // Apply Quantum Singularity Perk
-    const singularityPerk = state.perks.find(p => p.effectType === 'global_boost' && p.purchased);
-    if (singularityPerk) globalMultiplier *= singularityPerk.effectValue;
-
-    state.upgrades.filter(u => (!u.isTemporary && u.purchased && !u.targetGeneratorId) || (u.isTemporary && !u.targetGeneratorId && u.activeUntil && u.activeUntil > now)).forEach(u => {
-      globalMultiplier *= u.multiplier;
-    });
-
-    let totalLevels = 0;
-    
-    // Milestone Overdrive Research
-    const overdriveRes = state.researches.find(r => r.id === 'r8');
-    const overdriveMult = 1 + (overdriveRes ? overdriveRes.level * 0.05 : 0);
-
-    state.generators.forEach(gen => {
-      totalLevels += gen.level;
-      if (gen.level > 0) {
-        let genMultiplier = getMilestoneMultiplier(gen.level);
-        if (genMultiplier > 1) genMultiplier *= overdriveMult;
-
-        state.upgrades.filter(u => (!u.isTemporary && u.purchased && u.targetGeneratorId === gen.id) || (u.isTemporary && u.targetGeneratorId === gen.id && u.activeUntil && u.activeUntil > now)).forEach(u => {
-          genMultiplier *= u.multiplier;
-        });
-
-        const rate = (gen.baseOutput * gen.level * genMultiplier * globalMultiplier);
-        pointsPerSec += rate;
-        generatedPoints += rate * (deltaTimeMs / 1000);
-      }
-    });
-
-    // Handle Research Mode
-    let kfPerSec = 0;
-    if (state.isResearchMode) {
-      const researchEffPerk = state.perks.find(p => p.effectType === 'research_efficiency' && p.purchased);
-      const sacrificeRatio = researchEffPerk ? researchEffPerk.effectValue : 0.5;
-
-      const divertedEnergy = generatedPoints * sacrificeRatio;
-      generatedPoints -= divertedEnergy;
-      pointsPerSec *= (1 - sacrificeRatio);
-
-      const kfBoostPerk = state.perks.find(p => p.effectType === 'kf_boost' && p.purchased);
-      const kfMult = kfBoostPerk ? kfBoostPerk.effectValue : 1;
-
-      // Base KF generation off sqrt of raw points per sec to balance scaling
-      kfPerSec = (Math.pow(pointsPerSec * 2, 0.5) * 0.005) * kfMult; 
-      generatedKF = kfPerSec * (deltaTimeMs / 1000);
-    }
-
-    // QC Rate
-    const qcPerk = state.perks.find(p => p.effectType === 'qc_rate' && p.purchased);
-    const qcAccel = state.researches.find(r => r.id === 'r2');
-    const qcAccelMult = 1 + (qcAccel ? qcAccel.level * 0.05 : 0);
-
-    const qcPerSec = (totalLevels * 0.0001) * (qcPerk ? qcPerk.effectValue : 1) * qcAccelMult;
-    generatedCredits += qcPerSec * (deltaTimeMs / 1000);
-
-    return {
-      points: state.points + generatedPoints,
-      pointsRate: pointsPerSec,
-      lifetimePoints: state.lifetimePoints + generatedPoints,
-      credits: state.credits + generatedCredits,
-      qcRate: qcPerSec,
-      knowledgeFragments: state.knowledgeFragments + generatedKF,
-      kfRate: kfPerSec,
-      lastSaved: now
-    };
-  }),
-
-  calculateOfflineProgress: (lastTime) => {
+  calculateOfflineProgress: (lastTime) => set((state) => {
     const now = Date.now();
     const diffMs = now - lastTime;
     if (diffMs > 0) {
-      const state = get();
       const offlinePerk = state.perks.find(p => p.effectType === 'offline_boost' && p.purchased);
       let boost = offlinePerk ? offlinePerk.effectValue : 1;
 
@@ -408,8 +501,29 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
 
       const effectiveDiff = diffMs * boost;
-      state.tick(effectiveDiff);
-      console.log(`Calculated ${diffMs}ms of offline progress (Effective: ${effectiveDiff}ms).`);
+      
+      const maxIterations = 10000;
+      let chunkMs = 1000;
+      let iterations = Math.ceil(effectiveDiff / chunkMs);
+      
+      if (iterations > maxIterations) {
+        chunkMs = effectiveDiff / maxIterations;
+        iterations = maxIterations;
+      }
+      
+      let simState = { ...state };
+      let remaining = effectiveDiff;
+      
+      for (let i = 0; i < iterations; i++) {
+        const step = Math.min(chunkMs, remaining);
+        const changes = executeTick(simState, step);
+        simState = { ...simState, ...changes };
+        remaining -= step;
+      }
+      
+      console.log(`Calculated ${diffMs}ms of offline progress (Effective: ${effectiveDiff}ms) over ${iterations} chunks.`);
+      return simState;
     }
-  }
+    return state;
+  })
 }));

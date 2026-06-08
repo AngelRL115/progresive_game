@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGameStore, getMilestoneMultiplier } from '../../store/gameStore';
+import { useGameStore, getMilestoneMultiplier, checkGeneratorVisibility } from '../../store/gameStore';
 import { Cpu, Zap, Activity, HardDrive, Server, Shield, Hexagon, Infinity, Target, Sparkles } from 'lucide-react';
 
 const GenIcons: Record<string, any> = {
@@ -22,13 +22,15 @@ export const GeneratorList = () => {
   const points = useGameStore(state => state.points);
   const buyLevel = useGameStore(state => state.buyGeneratorLevel);
   const perks = useGameStore(state => state.perks);
+  const autoBuyers = useGameStore(state => state.autoBuyers || {});
+  const credits = useGameStore(state => state.credits);
+  const unlockAutoBuyer = useGameStore(state => state.unlockAutoBuyer);
+  const toggleAutoBuyer = useGameStore(state => state.toggleAutoBuyer);
+  const prestigeLevel = useGameStore(state => state.prestigeLevel);
 
   const [floats, setFloats] = useState<{id: number, x: number, y: number, text: string}[]>([]);
   const [particles, setParticles] = useState<{id: number, x: number, y: number, tx: string, ty: string, color: string}[]>([]);
   
-  const discountPerk = perks.find(p => p.effectType === 'discount' && p.purchased);
-  const discount = discountPerk ? discountPerk.effectValue : 1;
-
   const handleBuy = (e: React.MouseEvent, id: string) => {
     buyLevel(id);
     
@@ -84,7 +86,18 @@ export const GeneratorList = () => {
         />
       ))}
       
-      {generators.map(gen => {
+      {generators.map((gen, index) => {
+        const isVisible = checkGeneratorVisibility(gen.id, generators, points);
+        if (!isVisible) return null;
+
+        const discountPerk = perks.find(p => p.effectType === 'discount' && p.purchased);
+        let discount = discountPerk ? discountPerk.effectValue : 1;
+        
+        const earlyDiscount = perks.find(p => p.effectType === 'early_discount' && p.purchased);
+        if (earlyDiscount && gen.level < 10) {
+          discount *= earlyDiscount.effectValue;
+        }
+
         const cost = Math.floor(gen.baseCost * discount * Math.pow(gen.costMultiplier, gen.level));
         const canAfford = points >= cost;
         const IconComponent = GenIcons[gen.id] || Zap;
@@ -117,7 +130,7 @@ export const GeneratorList = () => {
               </div>
             </div>
             
-            <div style={{ marginLeft: '20px' }}>
+            <div style={{ marginLeft: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <button 
                 className="btn-neon" 
                 disabled={!canAfford}
@@ -126,6 +139,52 @@ export const GeneratorList = () => {
               >
                 LEVEL UP
               </button>
+              
+              {(() => {
+                const ab = autoBuyers[gen.id];
+                const abCost = 25 * Math.pow(2, index);
+                
+                if (ab?.unlocked) {
+                  return (
+                    <button 
+                      onClick={() => toggleAutoBuyer(gen.id)}
+                      style={{
+                        padding: '6px 12px',
+                        background: ab.active ? 'rgba(0, 255, 255, 0.2)' : 'transparent',
+                        border: `1px solid ${ab.active ? 'var(--neon-cyan)' : 'var(--text-muted)'}`,
+                        color: ab.active ? 'var(--neon-cyan)' : 'var(--text-muted)',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '0.8rem',
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      {ab.active ? 'AUTO: ON' : 'AUTO: OFF'}
+                    </button>
+                  );
+                } else if (prestigeLevel > 0) {
+                  const canAffordAb = credits >= abCost;
+                  return (
+                    <button 
+                      onClick={() => unlockAutoBuyer(gen.id)}
+                      disabled={!canAffordAb}
+                      style={{
+                        padding: '6px 12px',
+                        background: 'transparent',
+                        border: `1px solid ${canAffordAb ? 'var(--neon-purple)' : 'rgba(255,255,255,0.1)'}`,
+                        color: canAffordAb ? 'var(--neon-purple)' : 'var(--text-muted)',
+                        borderRadius: '4px',
+                        cursor: canAffordAb ? 'pointer' : 'not-allowed',
+                        fontSize: '0.8rem',
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      Unlock Auto: {abCost} QC
+                    </button>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         );

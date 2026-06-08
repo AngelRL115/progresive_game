@@ -4,17 +4,31 @@ import { useGameStore } from '../../store/gameStore';
 export const Sidebar = () => {
   const activeTab = useGameStore(state => state.activeTab);
   const setActiveTab = useGameStore(state => state.setActiveTab);
+  const prestigeLevel = useGameStore(state => state.prestigeLevel);
+  const lifetimePoints = useGameStore(state => state.lifetimePoints);
+  const generators = useGameStore(state => state.generators);
+
+  const hasMilestoneUnlocked = generators.some(g => g.level >= 10);
+  const hasPrestigeUnlocked = lifetimePoints >= 1000000 || prestigeLevel > 0;
+  const hasAdvancedUnlocked = prestigeLevel > 0;
 
   const navItems = [
-    { icon: Zap, label: 'UPGRADES' },
-    { icon: Star, label: 'PERKS' },
-    { icon: FlaskConical, label: 'LABORATORY' },
-    { icon: Award, label: 'MILESTONES' },
-    { icon: RefreshCcw, label: 'PRESTIGE' },
-  ];
+    { icon: Zap, label: 'UPGRADES', visible: true },
+    { icon: Star, label: 'PERKS', visible: hasAdvancedUnlocked },
+    { icon: FlaskConical, label: 'LABORATORY', visible: hasAdvancedUnlocked },
+    { icon: Award, label: 'MILESTONES', visible: hasMilestoneUnlocked },
+    { icon: RefreshCcw, label: 'PRESTIGE', visible: hasPrestigeUnlocked },
+  ].filter(item => item.visible);
 
   return (
-    <div className="glass-panel sidebar" style={{ padding: '20px' }}>
+    <div className="glass-panel sidebar" style={{ display: 'flex', flexDirection: 'column', padding: '20px', gap: '15px' }}>
+      <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+        <h2 style={{ color: 'var(--neon-cyan)', margin: 0, textTransform: 'uppercase', letterSpacing: '2px', fontSize: '1.2rem' }}>
+          Cosmic Idle
+        </h2>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
       {navItems.map(item => {
         const isActive = activeTab === item.label;
         return (
@@ -37,6 +51,7 @@ export const Sidebar = () => {
           </button>
         );
       })}
+      </div>
     </div>
   );
 };

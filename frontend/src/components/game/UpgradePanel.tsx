@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useGameStore } from '../../store/gameStore';
+import { useGameStore, checkGeneratorVisibility } from '../../store/gameStore';
 
 export const UpgradePanel = () => {
   const upgrades = useGameStore(state => state.upgrades);
@@ -18,6 +18,16 @@ export const UpgradePanel = () => {
       <h3 style={{ textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>ACTIVE MULTIPLIERS</h3>
       
       {upgrades.map(up => {
+        let isVisible = false;
+        if (up.targetGeneratorId) {
+          isVisible = checkGeneratorVisibility(up.targetGeneratorId, useGameStore.getState().generators, points);
+        } else {
+          // Global upgrades visibility
+          isVisible = points >= up.cost * 0.5 || up.purchased;
+        }
+
+        if (!isVisible) return null;
+
         const canAfford = points >= up.cost;
         const isActive = up.isTemporary && up.activeUntil && up.activeUntil > now;
         const isOnCooldown = up.isTemporary && up.cooldownUntil && up.cooldownUntil > now && !isActive;
