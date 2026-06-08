@@ -141,5 +141,6 @@ backend/savegame.sqlite
 backend/savegame.sqlite-journal
 backend/savegame.sqlite-wal
 backend/savegame.sqlite-shm
+backend/savegame.sqlite-wal
 *.sqlite
 *.db
