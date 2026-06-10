@@ -1,4 +1,13 @@
 import { create } from 'zustand';
+import { 
+  challengeShop,
+  getCosmicResonanceMult,
+  getCompressedCostMultiplier, 
+  getMilestoneResonanceExponent,
+  getSkillEmpowermentMultiplierExponent,
+  getSkillEmpowermentDurationMultiplier,
+  getResearchOverclockMultiplier
+} from '../data/challengeShop';
 
 export interface Generator {
   id: string;
@@ -92,12 +101,12 @@ export interface GameState {
   buyUpgrade: (id: string) => void;
   buyPerk: (id: string) => void;
   buyResearchLevel: (id: string) => void;
+  buyChallengeUpgrade: (id: string, cost: number) => void;
   activateAbility: (id: string) => void;
   prestigeReset: () => void;
   startChallenge: (id: string) => void;
   exitChallenge: () => void;
   completeChallenge: (goal: number, challengeId: string) => void;
-  buyChallengeUpgrade: (id: string, cost: number) => void;
   loadState: (state: Partial<GameState>) => void;
   tick: (deltaTimeMs: number) => void;
   calculateOfflineProgress: (lastTime: number) => void;
@@ -159,36 +168,36 @@ const initialResearches: Research[] = [
   { id: 'r8', name: 'Milestone Cascade', description: 'Milestones on Gen X grant Virtual Levels to Gen X+1', baseCost: 1000, costMultiplier: 3.0, level: 0 },
 ];
 
-export const getMilestoneMultiplier = (level: number, reduction: number = 0) => {
+export const getMilestoneMultiplier = (level: number) => {
   let mult = 1;
-  if (level >= Math.max(1, 10 - reduction)) mult *= 2;
-  if (level >= Math.max(1, 25 - reduction)) mult *= 2; // total 4
-  if (level >= Math.max(1, 50 - reduction)) mult *= 2.5; // total 10
-  if (level >= Math.max(1, 100 - reduction)) mult *= 5; // total 50
-  if (level >= Math.max(1, 200 - reduction)) mult *= 10; // total 500
-  if (level >= Math.max(1, 300 - reduction)) mult *= 10;
-  if (level >= Math.max(1, 400 - reduction)) mult *= 10;
-  if (level >= Math.max(1, 500 - reduction)) mult *= 10;
+  if (level >= 10) mult *= 2;
+  if (level >= 25) mult *= 2; // total 4
+  if (level >= 50) mult *= 2.5; // total 10
+  if (level >= 100) mult *= 5; // total 50
+  if (level >= 200) mult *= 10; // total 500
+  if (level >= 300) mult *= 10;
+  if (level >= 400) mult *= 10;
+  if (level >= 500) mult *= 10;
   
-  if (level > (500 - reduction)) {
-    const extra = Math.floor((level - (500 - reduction)) / 100);
+  if (level > 500) {
+    const extra = Math.floor((level - 500) / 100);
     mult *= Math.pow(10, extra);
   }
   return mult;
 };
 
-export const getMilestoneTier = (level: number, reduction: number = 0) => {
+export const getMilestoneTier = (level: number) => {
   let tier = 0;
-  if (level >= Math.max(1, 10 - reduction)) tier++;
-  if (level >= Math.max(1, 25 - reduction)) tier++;
-  if (level >= Math.max(1, 50 - reduction)) tier++;
-  if (level >= Math.max(1, 100 - reduction)) tier++;
-  if (level >= Math.max(1, 200 - reduction)) tier++;
-  if (level >= Math.max(1, 300 - reduction)) tier++;
-  if (level >= Math.max(1, 400 - reduction)) tier++;
-  if (level >= Math.max(1, 500 - reduction)) tier++;
-  if (level > (500 - reduction)) {
-    tier += Math.floor((level - (500 - reduction)) / 100);
+  if (level >= 10) tier++;
+  if (level >= 25) tier++;
+  if (level >= 50) tier++;
+  if (level >= 100) tier++;
+  if (level >= 200) tier++;
+  if (level >= 300) tier++;
+  if (level >= 400) tier++;
+  if (level >= 500) tier++;
+  if (level > 500) {
+    tier += Math.floor((level - 500) / 100);
   }
   return tier;
 };
@@ -218,19 +227,19 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
     const isDilation = state.activeChallengeId === 'ch_dilation';
     const isVoid = state.activeChallengeId === 'ch_void';
 
+    // Cache Challenge Shop levels
+    const lvlCosmic = state.challengeShopPurchases['cosmic_resonance'] || 0;
+    const lvlKnowledge = state.challengeShopPurchases['knowledge_leak'] || 0;
+    const lvlPrestige = state.challengeShopPurchases['prestige_power'] || 0;
+    const lvlAuto = state.challengeShopPurchases['autobuyer_network'] || 0;
+    const lvlMilestone = state.challengeShopPurchases['milestone_resonance'] || 0;
+    const lvlSkill = state.challengeShopPurchases['skill_empowerment'] || 0;
+    const lvlOverclock = state.challengeShopPurchases['research_overclock'] || 0;
+
     // Prestige Base + Research R5
     const prestigeResonance = state.researches.find(r => r.id === 'r5');
-    const prestigeBase = 0.1 + (prestigeResonance ? prestigeResonance.level * 0.01 : 0);
+    const prestigeBase = 0.1 + (prestigeResonance ? prestigeResonance.level * 0.01 : 0) + (lvlPrestige * 0.02);
     let globalMultiplier = isPoverty ? 1.0 : (1 + (state.prestigeLevel * prestigeBase));
-    
-    // Challenge Shop: Cosmic Resonance
-    const csResonance = state.challengeShopPurchases?.['cs_resonance'] || 0;
-    if (csResonance > 0) {
-      globalMultiplier += (csResonance * 0.10); // +10% base global mult per level additive
-    }
-    
-    // Challenge Shop: Milestone Reduction
-    const milestoneReduction = state.challengeShopPurchases?.['cs_milestone'] || 0;
 
     // Achievement Global Multipliers
     if (state.achievements) {
@@ -255,13 +264,24 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
     const singularityPerk = state.perks.find(p => p.effectType === 'global_boost' && p.purchased);
     if (singularityPerk) globalMultiplier *= singularityPerk.effectValue;
 
+    if (lvlCosmic > 0) {
+      globalMultiplier *= getCosmicResonanceMult(state.challengePoints, lvlCosmic);
+    }
+    if (lvlOverclock > 0) {
+      const totalResearches = state.researches.reduce((sum, r) => sum + r.level, 0);
+      globalMultiplier *= getResearchOverclockMultiplier(totalResearches, lvlOverclock);
+    }
+
     const darkEnergy = state.researches.find(r => r.id === 'r7');
     const r7Mult = 1 + (darkEnergy ? darkEnergy.level * 0.5 : 0);
 
     state.upgrades.filter(u => (!u.isTemporary && u.purchased && !u.targetGeneratorId) || (u.isTemporary && !u.targetGeneratorId && u.activeUntil && u.activeUntil > now)).forEach(u => {
       if (isEntanglement && !u.isTemporary) return; // Quantum Entanglement restricts permanent upgrades
       let m = u.multiplier;
-      if (u.isTemporary) m *= r7Mult;
+      if (u.isTemporary) {
+        m *= r7Mult;
+        if (lvlSkill > 0) m = Math.pow(m, getSkillEmpowermentMultiplierExponent(lvlSkill));
+      }
       globalMultiplier *= m;
     });
 
@@ -276,7 +296,7 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
       for (let i = 0; i < state.generators.length - 1; i++) {
         const gen = state.generators[i];
         // Solo cuentan los niveles REALES para empujar hacia abajo, para evitar feedback loops.
-        const tier = getMilestoneTier(gen.level, milestoneReduction);
+        const tier = getMilestoneTier(gen.level);
         virtualLevels[i + 1] = tier * cascadeLevel;
       }
     }
@@ -286,7 +306,12 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
       const effectiveLevel = gen.level + virtualLevels[index];
       
       if (effectiveLevel > 0) {
-        let genMultiplier = getMilestoneMultiplier(effectiveLevel, milestoneReduction);
+        let genMultiplier = getMilestoneMultiplier(effectiveLevel);
+        if (lvlMilestone > 0) {
+          const exponent = getMilestoneResonanceExponent(lvlMilestone);
+          const newMult = Math.pow(genMultiplier, exponent);
+          genMultiplier = Number.isFinite(newMult) ? newMult : Number.MAX_VALUE;
+        }
         
         // Achievement Gen Multipliers
         if (state.achievements) {
@@ -302,7 +327,10 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
         state.upgrades.filter(u => (!u.isTemporary && u.purchased && u.targetGeneratorId === gen.id) || (u.isTemporary && u.targetGeneratorId === gen.id && u.activeUntil && u.activeUntil > now)).forEach(u => {
           if (isEntanglement && !u.isTemporary) return; // Quantum Entanglement restricts permanent upgrades
           let m = u.multiplier;
-          if (u.isTemporary) m *= r7Mult;
+          if (u.isTemporary) {
+            m *= r7Mult;
+            if (lvlSkill > 0) m = Math.pow(m, getSkillEmpowermentMultiplierExponent(lvlSkill));
+          }
           genMultiplier *= m;
         });
 
@@ -314,6 +342,8 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
 
     // Handle Research Mode
     let kfPerSec = 0;
+    const baseKfRate = Math.pow(pointsPerSec, 0.65) * 0.001;
+
     if (state.isResearchMode && !isLockdown) {
       const researchEffPerk = state.perks.find(p => p.effectType === 'research_efficiency' && p.purchased);
       const sacrificeRatio = researchEffPerk ? researchEffPerk.effectValue : 0.5;
@@ -325,29 +355,25 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
       const kfBoostPerk = state.perks.find(p => p.effectType === 'kf_boost' && p.purchased);
       let kfMult = kfBoostPerk ? kfBoostPerk.effectValue : 1;
       
-      // Challenge Shop: Knowledge Leak
-      const csLeak = state.challengeShopPurchases?.['cs_leak'] || 0;
-      if (csLeak > 0) kfMult *= (1 + csLeak * 0.05);
-      
       if (state.achievements) {
         if (state.achievements.includes('ach_lt2')) kfMult *= 1.05;
         if (state.achievements.includes('ach_kf1')) kfMult *= 1.01;
         if (state.achievements.includes('ach_g3')) kfMult *= 1.10;
       }
 
-      // Base KF generation Opción B: Math.pow(Puntos/s, 0.65) * 0.001
-      kfPerSec = (Math.pow(pointsPerSec, 0.65) * 0.001) * kfMult; 
+      kfPerSec = baseKfRate * kfMult; 
       generatedKF = kfPerSec * (deltaTimeMs / 1000);
+    } else {
+      if (lvlKnowledge > 0) {
+        kfPerSec = baseKfRate * (Math.min(50, lvlKnowledge) * 0.01);
+        generatedKF = kfPerSec * (deltaTimeMs / 1000);
+      }
     }
 
     // QC Rate
     const qcPerk = state.perks.find(p => p.effectType === 'qc_rate' && p.purchased);
     const qcAccel = state.researches.find(r => r.id === 'r2');
     let qcAccelMult = 1 + (qcAccel ? qcAccel.level * 0.05 : 0);
-    
-    // Challenge Shop: Quantum Expansion
-    const csExpansion = state.challengeShopPurchases?.['cs_expansion'] || 0;
-    if (csExpansion > 0) qcAccelMult *= (1 + csExpansion * 0.10);
     
     if (state.achievements) {
       if (state.achievements.includes('ach_p1')) qcAccelMult *= 1.01;
@@ -383,6 +409,9 @@ export const executeTick = (state: GameState, deltaTimeMs: number): Partial<Game
           if (earlyDiscount && gen.level < 10) discount *= earlyDiscount.effectValue;
           
           let dynamicCostMult = gen.costMultiplier + (isDilation ? 0.10 : 0);
+          if (lvlAuto > 0) {
+            dynamicCostMult = getCompressedCostMultiplier(dynamicCostMult, lvlAuto);
+          }
 
           let currentLevel = gen.level;
           let cost = Math.floor(gen.baseCost * discount * Math.pow(dynamicCostMult, currentLevel));
@@ -534,7 +563,14 @@ export const useGameStore = create<GameState>((set, get) => ({
       discount *= Math.pow(0.95, cosmicArch.level);
     }
     
-    const cost = Math.floor(gen.baseCost * discount * Math.pow(gen.costMultiplier, gen.level));
+    const isDilation = state.activeChallengeId === 'ch_dilation';
+    let dynamicCostMult = gen.costMultiplier + (isDilation ? 0.10 : 0);
+    const lvlAuto = state.challengeShopPurchases['autobuyer_network'] || 0;
+    if (lvlAuto > 0) {
+      dynamicCostMult = getCompressedCostMultiplier(dynamicCostMult, lvlAuto);
+    }
+
+    const cost = Math.floor(gen.baseCost * discount * Math.pow(dynamicCostMult, gen.level));
     if (state.points >= cost) {
       return {
         points: state.points - cost,
@@ -603,6 +639,26 @@ export const useGameStore = create<GameState>((set, get) => ({
     return state;
   }),
 
+  buyChallengeUpgrade: (id, cost) => set((state) => {
+    if (state.challengePoints >= cost) {
+      const upgrade = challengeShop.find(u => u.id === id);
+      const currentLevel = state.challengeShopPurchases[id] || 0;
+      
+      if (upgrade && upgrade.maxLevel !== null && currentLevel >= upgrade.maxLevel) {
+        return state;
+      }
+
+      return {
+        challengePoints: state.challengePoints - cost,
+        challengeShopPurchases: {
+          ...state.challengeShopPurchases,
+          [id]: currentLevel + 1
+        }
+      };
+    }
+    return state;
+  }),
+
   activateAbility: (id) => set((state) => {
     const upgrade = state.upgrades.find(u => u.id === id);
     if (!upgrade || !upgrade.isTemporary) return state;
@@ -616,12 +672,11 @@ export const useGameStore = create<GameState>((set, get) => ({
     let bonusDuration = 0;
     if (state.achievements.includes('ach_sk2')) bonusDuration += 2000;
     if (state.achievements.includes('ach_sk3')) cdMult *= 0.9;
-    
-    // Challenge Shop: Skill Empowerment
-    const csEmpowerment = state.challengeShopPurchases?.['cs_empowerment'] || 0;
-    if (csEmpowerment > 0) bonusDuration += (((upgrade.baseDurationMs || 0) + ((upgrade.durationLevel || 0) * 1000)) * (csEmpowerment * 0.10));
 
-    const duration = (upgrade.baseDurationMs || 0) + ((upgrade.durationLevel || 0) * 1000) + bonusDuration;
+    const lvlSkill = state.challengeShopPurchases['skill_empowerment'] || 0;
+    const durationMult = getSkillEmpowermentDurationMultiplier(lvlSkill);
+
+    const duration = ((upgrade.baseDurationMs || 0) + ((upgrade.durationLevel || 0) * 1000) + bonusDuration) * durationMult;
     return {
       upgrades: state.upgrades.map(u => u.id === id ? { ...u, activeUntil: now + duration, cooldownUntil: now + duration + ((u.cooldownMs || 10000) * cdMult) } : u),
       statistics: { ...state.statistics, skillsActivated: state.statistics.skillsActivated + 1 }
@@ -666,15 +721,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       activeChallengeId: null,
       challengeCompletions: { ...state.challengeCompletions, [challengeId]: newCompletions },
       challengePoints: state.challengePoints + cpEarned,
-    };
-  }),
-
-  buyChallengeUpgrade: (id, cost) => set((state) => {
-    if (state.challengePoints < cost) return state;
-    const purchases = state.challengeShopPurchases[id] || 0;
-    return {
-      challengePoints: state.challengePoints - cost,
-      challengeShopPurchases: { ...state.challengeShopPurchases, [id]: purchases + 1 }
     };
   }),
 

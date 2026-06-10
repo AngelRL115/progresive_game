@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGameStore, getMilestoneMultiplier, checkGeneratorVisibility } from '../../store/gameStore';
+import { getCompressedCostMultiplier, getMilestoneResonanceExponent } from '../../data/challengeShop';
 import { Cpu, Zap, Activity, HardDrive, Server, Shield, Hexagon, Infinity, Target, Sparkles } from 'lucide-react';
 
 const GenIcons: Record<string, any> = {
@@ -27,6 +28,9 @@ export const GeneratorList = () => {
   const unlockAutoBuyer = useGameStore(state => state.unlockAutoBuyer);
   const toggleAutoBuyer = useGameStore(state => state.toggleAutoBuyer);
   const prestigeLevel = useGameStore(state => state.prestigeLevel);
+  const challengeShopPurchases = useGameStore(state => state.challengeShopPurchases);
+  const activeChallengeId = useGameStore(state => state.activeChallengeId);
+  const isDilation = activeChallengeId === 'ch_dilation';
 
   const [floats, setFloats] = useState<{id: number, x: number, y: number, text: string}[]>([]);
   const [particles, setParticles] = useState<{id: number, x: number, y: number, tx: string, ty: string, color: string}[]>([]);
@@ -98,10 +102,24 @@ export const GeneratorList = () => {
           discount *= earlyDiscount.effectValue;
         }
 
-        const cost = Math.floor(gen.baseCost * discount * Math.pow(gen.costMultiplier, gen.level));
+        const lvlAuto = challengeShopPurchases['autobuyer_network'] || 0;
+        const lvlMilestone = challengeShopPurchases['milestone_resonance'] || 0;
+
+        let dynamicCostMult = gen.costMultiplier + (isDilation ? 0.10 : 0);
+        if (lvlAuto > 0) {
+          dynamicCostMult = getCompressedCostMultiplier(dynamicCostMult, lvlAuto);
+        }
+
+        const cost = Math.floor(gen.baseCost * discount * Math.pow(dynamicCostMult, gen.level));
         const canAfford = points >= cost;
         const IconComponent = GenIcons[gen.id] || Zap;
-        const milestoneMultiplier = getMilestoneMultiplier(gen.level);
+        
+        let milestoneMultiplier = getMilestoneMultiplier(gen.level);
+        if (lvlMilestone > 0) {
+          const exponent = getMilestoneResonanceExponent(lvlMilestone);
+          const newMult = Math.pow(milestoneMultiplier, exponent);
+          milestoneMultiplier = Number.isFinite(newMult) ? newMult : Number.MAX_VALUE;
+        }
         
         return (
           <div key={gen.id} className="glass-panel" style={{ padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

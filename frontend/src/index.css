@@ -124,6 +124,7 @@ body {
 .right-panel {
   grid-column: 3;
   grid-row: 2;
+  overflow-y: auto;
 }
 
 ::-webkit-scrollbar {

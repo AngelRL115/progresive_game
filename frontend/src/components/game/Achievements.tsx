@@ -16,7 +16,7 @@ export const Achievements: React.FC = () => {
   const progress = Math.floor((unlockedIds.length / achievements.length) * 100);
 
   return (
-    <div className="achievements-container" style={{ padding: '20px', maxWidth: '900px', margin: '0 auto', width: '100%' }}>
+    <div className="right-panel" style={{ padding: '20px', maxWidth: '900px', margin: '0 auto', width: '100%', overflowY: 'auto' }}>
       <h2 className="neon-text" style={{ textAlign: 'center', marginBottom: '10px' }}>Cosmic Achievements</h2>
       
       <div style={{ textAlign: 'center', marginBottom: '30px' }}>

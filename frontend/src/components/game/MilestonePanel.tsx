@@ -1,7 +1,9 @@
 import { useGameStore, getMilestoneMultiplier } from '../../store/gameStore';
+import { getMilestoneResonanceExponent } from '../../data/challengeShop';
 
 export const MilestonePanel = () => {
   const generators = useGameStore(state => state.generators);
+  const challengeShopPurchases = useGameStore(state => state.challengeShopPurchases);
 
   return (
     <div className="right-panel" style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxHeight: '80vh', overflowY: 'auto' }}>
@@ -34,7 +36,14 @@ export const MilestonePanel = () => {
         else prevMilestone = nextMilestone - 100;
 
         const progress = ((gen.level - prevMilestone) / (nextMilestone - prevMilestone)) * 100;
-        const currentMultiplier = getMilestoneMultiplier(gen.level);
+
+        const lvlMilestone = challengeShopPurchases['milestone_resonance'] || 0;
+        let currentMultiplier = getMilestoneMultiplier(gen.level);
+        if (lvlMilestone > 0) {
+          const exponent = getMilestoneResonanceExponent(lvlMilestone);
+          const newMult = Math.pow(currentMultiplier, exponent);
+          currentMultiplier = Number.isFinite(newMult) ? newMult : Number.MAX_VALUE;
+        }
 
         return (
           <div key={gen.id} className="glass-panel" style={{ padding: '15px' }}>
